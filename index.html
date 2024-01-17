@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Olympic Medals Dashboard</title>
+    <style>
+        /* CSS */
+    </style>
+</head>
+<script src="https://d3js.org/d3.v7.js"></script>
+<script src="https://unpkg.com/d3-simple-slider"></script>
+
+<body>
+    <div class="body text">
+        <h1>Number of medals won per country throughout the history of the Olympic Games</h1>
+    </div>
+    <div id="world-map"></div>
+    <div id="slider-container" class="slider-container"></div>
+</body>
+
+<script>
+
+Promise.all([
+    d3.csv('athlete_events.csv'),
+    d3.csv('noc_regions.csv')
+]).then(function(files) {
+    var athleteData = files[0];
+    var nocData = files[1];
+
+    var nocToCountry = {};
+    nocData.forEach(function(d) {
+        nocToCountry[d.NOC] = d.region;
+    });
+
+    // Add country names to the athlete data
+    athleteData.forEach(function(d) {
+        d.Country = nocToCountry[d.NOC] || d.NOC; 
+    });
+
+    var filteredData = athleteData.filter(function(d) {
+        return d.Medal && d.Medal !== "NA";
+    });
+
+    // Group and count medals by year, season, and country
+    var medalsByYearAndCountry = d3.rollups(filteredData, 
+        v => v.length,
+        d => d.Year + " " + d.Season,   // first level grouping
+        d => d.Country
+    )
+
+    medalsByYearAndCountry.sort(function(a, b) {
+        var yearA = parseInt(a[0].split(" ")[0]);
+        var yearB = parseInt(b[0].split(" ")[0]);
+
+        return yearA - yearB;
+    });
+
+
+    // Load the world map
+    d3.json('https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson').then(function(world) {
+
+        var svg = d3.select('#world-map').append('svg')
+            .attr('width', 960)
+            .attr('height', 500);
+
+        var projection = d3.geoMercator()
+            .scale(150)
+            .translate([svg.attr('width') / 2, svg.attr('height') / 2]);
+        var path = d3.geoPath().projection(projection);
+
+        // color scale
+        var maxMedals = d3.max(medalsByYearAndCountry, function(yearSeason) {
+            return d3.max(yearSeason[1], function(countryData) {
+                return countryData[1]; // this is medal count
+            });
+        });
+
+        var colorScale = d3.scaleSequential(d3.interpolateBlues)
+            .domain([0, maxMedals]);
+
+            function updateMapForYearSeason(yearSeason) {
+                    var [year, season] = yearSeason[0].split(" ");
+
+                    console.log("year-season:", year, season);
+
+                    svg.selectAll('path')
+                        .transition()
+                        .duration(500)
+                        .attr('fill', function(d) {
+                            var countryCode = d.properties.name;
+                            var medalCount = 0; // Default to 0 medals
+
+                            yearSeason[1].forEach(function(country) {
+
+                                if (country[0] === countryCode) {
+                                    medalCount += country[1];
+                                }
+                                    
+                              
+                            });
+                            return medalCount > 0 ? colorScale(medalCount) : 'lightgray';
+                        })
+                        .on('mouseover', function(d) {
+                            var countryCode = d.properties.name;
+                            var medalCount = 0; // Default to 0 
+
+                            yearSeason[1].forEach(function(country) {
+
+                                if (country[0] === countryCode) {
+                                    medalCount += country[1];
+                                }
+                                    
+                              
+                            });
+
+                            tooltip.text(medalCount);
+                        })
+            }
+
+            // Draw the map
+            svg.selectAll('path')
+                .data(world.features)
+                .enter().append('path')
+                .attr('d', path)
+                .attr('fill', 'lightgray'); // Default fill
+
+
+            // SLIDER
+            var slider = d3.sliderBottom()
+                .min(0)
+                .max(medalsByYearAndCountry.length - 1)
+                .step(1)
+                .tickFormat(i => medalsByYearAndCountry[i][0])
+                .ticks(medalsByYearAndCountry.length)
+                .on('onchange', i => {
+                    updateMapForYearSeason(medalsByYearAndCountry[i]);
+                });
+
+            var sliderSvg = d3.select('#slider-container').append('svg')
+                .attr('width', 1000) 
+                .attr('height', 100)
+                .append('g')
+                .attr('transform', 'translate(30,30)');
+
+            sliderSvg.call(slider);
+
+            // Initial map update
+            updateMapForYearSeason(medalsByYearAndCountry[0]);
+    });
+});
+
+</script>
+</html>
