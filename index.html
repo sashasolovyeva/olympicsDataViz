@@ -4,6 +4,10 @@
     <meta charset="utf-8">
     <title>Olympic Medals Dashboard</title>
     <style>
+        body {
+            font-family: 'Courier New', Courier, monospace;
+        }
+
         .tooltip {
             position: absolute;
             top: 0;
@@ -18,6 +22,15 @@
             margin-left: 50%;
             transform: translate(-50%, 0);
         }
+
+        h1, p {
+            max-width: 600px;
+        }
+
+        .body h1, .body p {
+            max-width: 80%;
+        }
+
     </style>
 </head>
 <script src="https://d3js.org/d3.v7.js"></script>
@@ -26,14 +39,28 @@
 <body>
     <div class="body text">
         <h1>Number of medals won per country throughout the history of the Olympic Games</h1>
-        <p>Hover over countries to see medal counts!</p>
+        <p>The purpose of this visualization is to showcase factors that affect an athlete's likelihood to win a medal, 
+            focusing on the effect of democractic vs. non-democractic regimes on the development of sports.
+        </p>
     </div>
     <div class="viz-container">
-        <div id="world-map"></div>
-        <div id="scatterplot"></div>
+        <div id="world-map">
+            <p>Map showing the number of medals won by a country at each Olympic Games since 1896 (change year with the slider below).</p>
+            <p>Hover over countries to see medal counts!</p>
+            <p>Click on a country to keep track of it as you interact with the slider. Click again to stop tracking.</p>
+        </div>
+        <div id="scatterplot">
+            <p>Scatterplot showcasing correlations between number of medals won by a country at each Games vs. state of its 
+                democracy at the time. 
+            </p>
+        </div>
     </div>
 
     <div id="slider-container" class="slider-container"></div>
+
+    <div>
+        <p>P.S. Clicking event doesn't always fire unfortunately, so please try a few times!</p>
+    </div>
 </body>
 
 <script>
@@ -85,6 +112,9 @@ Promise.all([
 
         return yearA - yearB;
     });
+
+    var highlightedCountries = new Set();
+
 
 
     // Load the world map
@@ -162,10 +192,12 @@ Promise.all([
                     return medalCount > 0 ? colorScale(medalCount) : 'lightgray';
                 })
 
+            var countryColors = {};
+
             // MAP Mousover
             mapsvg.selectAll('path')
                 .on('mouseover', function(event, d) {
-                    d3.select(this).style("stroke", "black"); 
+                    d3.select(this).style("opacity", .8); 
 
                     var countryCode = d.properties.name;
                     var medalCount = 0;
@@ -184,12 +216,46 @@ Promise.all([
                         .style("top", (event.pageY - 28) + "px");
                 })
                 .on('mouseout', function(d) {
-                    d3.select(this).style("stroke", "none"); // Reset style on mouseout
+                    d3.select(this).style("opacity", 1); // Reset style on mouseout
 
                     tooltip.transition()
                         .duration(500)
                         .style('display', 'none');
-                });
+                })
+                .on('click', function(event, d) {
+                    var clickedCountry = d3.select(this);
+                    var countryIdentifier = d.properties.name; 
+
+                    console.log(highlightedCountries)
+
+                    // Check if the country is already highlighted
+                    if (highlightedCountries.has(countryIdentifier)) {
+                        // Reset to original color if already clicked before
+                        var originalColor = clickedCountry.attr("data-original-color") || clickedCountry.attr("fill");
+                        clickedCountry.style("stroke", "none");
+                        highlightedCountries.delete(countryIdentifier);
+                        delete countryColors[countryIdentifier];
+                    } else {
+                        // Generate a new random color
+                        var randomColor = '#' + Math.floor(Math.random() * 16777215).toString(16);
+                        clickedCountry.style("stroke", randomColor).style("stroke-width", 4);
+                        highlightedCountries.add(countryIdentifier);
+                        countryColors[countryIdentifier] = randomColor;
+                    }
+
+                    // Update the stroke of circles in the scatterplot
+                    scattersvg.selectAll("circle")
+                        .style("stroke", function(circleData) {
+                            if (highlightedCountries.has(circleData.Country)) {
+                                return countryColors[circleData.Country];
+                            }
+                            return null;
+                        })
+                        .style("stroke-width", function(circleData) {
+                            return highlightedCountries.has(circleData.Country) ? 4 : null;
+                        });
+                })
+
 
             // SCATTERPLOT
             var scatterData = yearSeason[1].map(d => {
