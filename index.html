@@ -9,6 +9,15 @@
             top: 0;
             left: 0;
         }
+
+        .viz-container div {
+            display: inline-block;
+        }
+
+        .slider-container {
+            margin-left: 50%;
+            transform: translate(-50%, 0);
+        }
     </style>
 </head>
 <script src="https://d3js.org/d3.v7.js"></script>
@@ -19,9 +28,12 @@
         <h1>Number of medals won per country throughout the history of the Olympic Games</h1>
         <p>Hover over countries to see medal counts!</p>
     </div>
-    <div id="world-map"></div>
+    <div class="viz-container">
+        <div id="world-map"></div>
+        <div id="scatterplot"></div>
+    </div>
+
     <div id="slider-container" class="slider-container"></div>
-    <div id="scatterplot"></div>
 </body>
 
 <script>
@@ -80,11 +92,11 @@ Promise.all([
 
         // MAP (pt 1)
         let mapsvg = d3.select('#world-map').append('svg')
-            .attr('width', 960)
-            .attr('height', 500);
+            .attr('width', 600)
+            .attr('height', 400);
 
         var projection = d3.geoMercator()
-            .scale(150)
+            .scale(100)
             .translate([mapsvg.attr('width') / 2, mapsvg.attr('height') / 2]);
         var path = d3.geoPath().projection(projection);
 
@@ -107,8 +119,8 @@ Promise.all([
         // SCATTERPLOT (pt 2)
 
         var margin = {top: 20, right: 20, bottom: 30, left: 40},
-            width = 960 - margin.left - margin.right,
-            height = 500 - margin.top - margin.bottom;
+            width = 600 - margin.left - margin.right,
+            height = 400 - margin.top - margin.bottom;
 
         // Append SVG object to the body
         var scattersvg = d3.select("#scatterplot").append("svg")
