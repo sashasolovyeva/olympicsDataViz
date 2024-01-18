@@ -4,7 +4,11 @@
     <meta charset="utf-8">
     <title>Olympic Medals Dashboard</title>
     <style>
-        /* CSS */
+        .tooltip {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
     </style>
 </head>
 <script src="https://d3js.org/d3.v7.js"></script>
@@ -13,40 +17,55 @@
 <body>
     <div class="body text">
         <h1>Number of medals won per country throughout the history of the Olympic Games</h1>
+        <p>Hover over countries to see medal counts!</p>
     </div>
     <div id="world-map"></div>
     <div id="slider-container" class="slider-container"></div>
+    <div id="scatterplot"></div>
 </body>
 
 <script>
 
 Promise.all([
     d3.csv('athlete_events.csv'),
-    d3.csv('noc_regions.csv')
+    d3.csv('noc_regions.csv'),
+    d3.csv('electoral-democracy-index.csv')
 ]).then(function(files) {
     var athleteData = files[0];
     var nocData = files[1];
+    var democracyData = files[2];
 
     var nocToCountry = {};
     nocData.forEach(function(d) {
         nocToCountry[d.NOC] = d.region;
     });
 
+    var countryToDemocracyIndex = {};
+    democracyData.forEach(function(d) {
+        countryToDemocracyIndex[d.Code] = +d.electdem_vdem_owid; 
+        countryToDemocracyIndex[d.Entity] = +d.electdem_vdem_owid; 
+    });
+
     // Add country names to the athlete data
     athleteData.forEach(function(d) {
         d.Country = nocToCountry[d.NOC] || d.NOC; 
+        d.DemocracyIndex = countryToDemocracyIndex[d.Country] || countryToDemocracyIndex[d.NOC];
     });
+
 
     var filteredData = athleteData.filter(function(d) {
         return d.Medal && d.Medal !== "NA";
     });
 
-    // Group and count medals by year, season, and country
+    // Group and count medals by year, season, country
     var medalsByYearAndCountry = d3.rollups(filteredData, 
         v => v.length,
-        d => d.Year + " " + d.Season,   // first level grouping
-        d => d.Country
+        d => d.Year + " " + d.Season,
+        d => d.Country,
+        d => d.DemocracyIndex
     )
+
+    console.log(medalsByYearAndCountry)
 
     medalsByYearAndCountry.sort(function(a, b) {
         var yearA = parseInt(a[0].split(" ")[0]);
@@ -59,94 +78,210 @@ Promise.all([
     // Load the world map
     d3.json('https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson').then(function(world) {
 
-        var svg = d3.select('#world-map').append('svg')
+        // MAP (pt 1)
+        let mapsvg = d3.select('#world-map').append('svg')
             .attr('width', 960)
             .attr('height', 500);
 
         var projection = d3.geoMercator()
             .scale(150)
-            .translate([svg.attr('width') / 2, svg.attr('height') / 2]);
+            .translate([mapsvg.attr('width') / 2, mapsvg.attr('height') / 2]);
         var path = d3.geoPath().projection(projection);
 
         // color scale
         var maxMedals = d3.max(medalsByYearAndCountry, function(yearSeason) {
             return d3.max(yearSeason[1], function(countryData) {
-                return countryData[1]; // this is medal count
+                return countryData[1][0][1]; // this is medal count
             });
         });
 
         var colorScale = d3.scaleSequential(d3.interpolateBlues)
             .domain([0, maxMedals]);
 
-            function updateMapForYearSeason(yearSeason) {
-                    var [year, season] = yearSeason[0].split(" ");
+        // tooltip
+        var tooltip = d3.select("body").append("div")
+            .attr("class", "tooltip")
+            .style("display", 'none');
 
-                    console.log("year-season:", year, season);
 
-                    svg.selectAll('path')
-                        .transition()
+        // SCATTERPLOT (pt 2)
+
+        var margin = {top: 20, right: 20, bottom: 30, left: 40},
+            width = 960 - margin.left - margin.right,
+            height = 500 - margin.top - margin.bottom;
+
+        // Append SVG object to the body
+        var scattersvg = d3.select("#scatterplot").append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        // Set the ranges
+        var x = d3.scaleLinear().range([0, width]);
+        var y = d3.scaleLinear().range([height, 0]);
+
+        // Define the axes
+        var xAxis = d3.axisBottom(x);
+        var yAxis = d3.axisLeft(y)
+            .tickFormat(function(d) { 
+                if(d == 1) { return "max"; }
+                if(d == 0) { return "min"; }
+            });
+
+        
+        // Update function
+        function updateMapForYearSeason(yearSeason) {
+            var [year, season] = yearSeason[0].split(" ");
+
+            mapsvg.selectAll('path')
+                .transition()
+                .duration(500)
+                .attr('fill', function(d) {
+                    var countryCode = d.properties.name;
+                    var medalCount = 0; // Default to 0 medals
+
+                    yearSeason[1].forEach(function(country) {
+                        if (country[0] === countryCode) {
+                            medalCount += country[1][0][1];
+                        }
+                    });
+
+                    return medalCount > 0 ? colorScale(medalCount) : 'lightgray';
+                })
+
+            // MAP Mousover
+            mapsvg.selectAll('path')
+                .on('mouseover', function(event, d) {
+                    d3.select(this).style("stroke", "black"); 
+
+                    var countryCode = d.properties.name;
+                    var medalCount = 0;
+
+                    yearSeason[1].forEach(function(country) {
+                        
+                        if (country[0] === countryCode) {
+                            medalCount += country[1][0][1];
+                        }
+                    });
+
+                    tooltip.transition()
+                        .style('display', 'block')
+                    tooltip.html("Country: " + countryCode + "<br/>Medals: " + medalCount)
+                        .style("left", (event.pageX) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on('mouseout', function(d) {
+                    d3.select(this).style("stroke", "none"); // Reset style on mouseout
+
+                    tooltip.transition()
                         .duration(500)
-                        .attr('fill', function(d) {
-                            var countryCode = d.properties.name;
-                            var medalCount = 0; // Default to 0 medals
-
-                            yearSeason[1].forEach(function(country) {
-
-                                if (country[0] === countryCode) {
-                                    medalCount += country[1];
-                                }
-                                    
-                              
-                            });
-                            return medalCount > 0 ? colorScale(medalCount) : 'lightgray';
-                        })
-                        .on('mouseover', function(d) {
-                            var countryCode = d.properties.name;
-                            var medalCount = 0; // Default to 0 
-
-                            yearSeason[1].forEach(function(country) {
-
-                                if (country[0] === countryCode) {
-                                    medalCount += country[1];
-                                }
-                                    
-                              
-                            });
-
-                            tooltip.text(medalCount);
-                        })
-            }
-
-            // Draw the map
-            svg.selectAll('path')
-                .data(world.features)
-                .enter().append('path')
-                .attr('d', path)
-                .attr('fill', 'lightgray'); // Default fill
-
-
-            // SLIDER
-            var slider = d3.sliderBottom()
-                .min(0)
-                .max(medalsByYearAndCountry.length - 1)
-                .step(1)
-                .tickFormat(i => medalsByYearAndCountry[i][0])
-                .ticks(medalsByYearAndCountry.length)
-                .on('onchange', i => {
-                    updateMapForYearSeason(medalsByYearAndCountry[i]);
+                        .style('display', 'none');
                 });
 
-            var sliderSvg = d3.select('#slider-container').append('svg')
-                .attr('width', 1000) 
-                .attr('height', 100)
-                .append('g')
-                .attr('transform', 'translate(30,30)');
+            // SCATTERPLOT
+            var scatterData = yearSeason[1].map(d => {
+                return { Country: d[0], TotalMedals: d[1][0][1], DemocracyIndex: d[1][0][0] };
+            });
 
-            sliderSvg.call(slider);
+            // Scale the range of the data
+            x.domain([0, 1]);
+            y.domain([0, d3.max(scatterData, function(d) { return d.TotalMedals; })]);
 
-            // Initial map update
-            updateMapForYearSeason(medalsByYearAndCountry[0]);
+            // Add the scatterplot points
+            // Bind data to the scatterplot points
+            var circles = scattersvg.selectAll("circle")
+                .data(scatterData);
+
+            circles.enter().append("circle")
+                .merge(circles)
+                .transition()
+                .duration(500)
+                .attr("r", 5);
+            
+            circles.attr("cx", function(d) { return x(d.DemocracyIndex); })
+                .attr("cy", function(d) { return y(d.TotalMedals); })
+                .style("fill", "#69b3a2")
+                .on("mouseover", function(event, d) {
+                    d3.select(this).style("stroke", "black");
+                    tooltip.transition()
+                        .style("display", "block");
+                    tooltip.html("Country: " + d.Country + "<br/>Medals: " + d.TotalMedals)
+                        .style("left", (event.pageX) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function(d) {
+                    d3.select(this).style("stroke", "none");
+                    tooltip.transition()
+                        .style("display", "none");
+                });
+
+
+            // Remove old data
+            circles.exit().remove();
+        }
+
+        // Draw the map
+        mapsvg.selectAll('path')
+            .data(world.features)
+            .enter().append('path')
+            .attr('d', path)
+            .attr('fill', 'lightgray'); // Default fill
+
+        
+        // Draw the scatterplot
+        // Add the X Axis
+        scattersvg.append("g")
+            .attr("transform", "translate(0," + height + ")")
+            .call(xAxis);
+
+        // Add the Y Axis
+        scattersvg.append("g")
+            .call(yAxis);
+
+        // Add X Axis label
+        scattersvg.append("text")
+            .attr("class", "axis-label")
+            .attr("x", width / 2)  // Position in the middle of the axis
+            .attr("y", height + margin.bottom - 10) // Adjust position below the x-axis
+            .style("text-anchor", "middle")
+            .text("Democracy Index");
+
+        // Add Y Axis label
+        scattersvg.append("text")
+            .attr("class", "axis-label")
+            .attr("transform", "rotate(-90)")
+            .attr("y", -margin.left + 20) // Adjust position to the left of the y-axis
+            .attr("x", -height / 2) // Center along the y-axis
+            .style("text-anchor", "middle")
+            .text("Total Medals");
+
+
+        // SLIDER
+        var slider = d3.sliderBottom()
+            .min(0)
+            .max(medalsByYearAndCountry.length - 1)
+            .step(1)
+            .tickFormat(i => medalsByYearAndCountry[i][0])
+            .ticks(medalsByYearAndCountry.length)
+            .width(500)
+            .on('onchange', i => {
+                updateMapForYearSeason(medalsByYearAndCountry[i]);
+            });
+
+        var sliderSvg = d3.select('#slider-container').append('svg')
+            .attr('width', 800) 
+            .attr('height', 100)
+            .append('g')
+            .attr('transform', 'translate(30,30)');
+
+        sliderSvg.call(slider);
+
+        // Initial map update
+        updateMapForYearSeason(medalsByYearAndCountry[0]);
     });
+
+    
 });
 
 </script>
